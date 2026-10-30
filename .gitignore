@@ -1,0 +1,21 @@
+# Ambiente Python
+.venv/
+__pycache__/
+*.pyc
+
+# Dados (gerados por src/baixar_dados.py e src/etl_prf_acidentes.py)
+dados/*
+!dados/README.md
+
+# Arquivos do tema antigo (infrações do Recife)
+projeto_7.py
+
+# Material da disciplina
+docs/tbp.pdf
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.streamlit/secrets.toml
