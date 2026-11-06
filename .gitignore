@@ -13,6 +13,9 @@ projeto_7.py
 # Material da disciplina
 docs/tbp.pdf
 
+# Exportações locais da documentação
+docs/documentacao_projeto.*
+
 # Sistema / editores
 .DS_Store
 Thumbs.db

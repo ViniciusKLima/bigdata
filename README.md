@@ -6,6 +6,8 @@ dados abertos da Polícia Rodoviária Federal, cruzados com infrações, popula�
 **Pergunta central:** quando, onde e por que acontecem os acidentes mais graves — e a
 fiscalização está onde as pessoas morrem?
 
+**Painel online:** https://viniciusklima.github.io/bigdata/
+
 ## Números iniciais (2019–2025)
 
 - 473.813 acidentes
@@ -37,6 +39,18 @@ python src/etl_prf_acidentes.py   # trata e gera os arquivos Parquet (~35 s)
 streamlit run app/dashboard.py    # abre o dashboard em http://localhost:8501
 ```
 
+## Site (GitHub Pages)
+
+O Pages só serve arquivos estáticos, então o Streamlit não roda lá. O Python gera os dados
+compactados e o navegador filtra e desenha. Para atualizar o site:
+
+```bash
+python src/gerar_site.py                              # recria site/assets/dados.bin.gz e meta.json
+git add site && git commit -m "Atualiza dados do site"
+git push origin main
+git push origin `git subtree split --prefix site main`:gh-pages --force
+```
+
 ## Estrutura
 
 ```
@@ -44,6 +58,8 @@ app/dashboard.py            dashboard interativo (Streamlit + Plotly)
 src/config.py               caminhos do projeto
 src/baixar_dados.py         download das fontes de dados
 src/etl_prf_acidentes.py    limpeza e padronização dos acidentes -> Parquet
+src/gerar_site.py           gera os dados compactos do site estático
+site/                       site publicado no GitHub Pages
 dados/                      dados brutos e tratados (fora do Git, ver dados/README.md)
 docs/                       documentação do projeto
 BIGDATA.pbix                relatório Power BI
