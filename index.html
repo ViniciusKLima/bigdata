@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acidentes nas rodovias federais</title>
+<meta name="description" content="Painel interativo dos acidentes nas rodovias federais brasileiras, 2019 a 2025, com dados abertos da PRF.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 3C24 9 14 10 6 8c2 26 6 42 26 53C52 50 56 34 58 8c-8 2-18 1-26-5z' fill='%23fff' stroke='%23000' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/estilo.css">
+</head>
+<body>
+
+<header class="placa-area">
+  <div class="placa">
+    <div class="placa-topo">
+      <svg class="escudo" viewBox="0 0 120 130" role="img" aria-labelledby="escudo-rotulo">
+        <title id="escudo-rotulo">Escudo de rodovia federal</title>
+        <path d="M60 5C46 16 26 18 8 13c3 50 10 84 52 111 42-27 49-61 52-111-18 5-38 3-52-8z" fill="#fff" stroke="#000" stroke-width="5"/>
+        <text x="60" y="52" text-anchor="middle" font-size="30" font-weight="800">BR</text>
+        <text id="escudo-numero" x="60" y="90" text-anchor="middle" font-size="24" font-weight="800">todas</text>
+      </svg>
+      <div>
+        <h1>Acidentes nas rodovias federais</h1>
+        <p id="escopo" class="escopo">Carregando os dados…</p>
+      </div>
+    </div>
+    <dl class="destinos">
+      <div class="destino destino-principal"><dt>Mortos</dt><dd id="kpi-mortos">…</dd></div>
+      <div class="destino"><dt>Feridos graves</dt><dd id="kpi-graves">…</dd></div>
+      <div class="destino"><dt>Feridos leves</dt><dd id="kpi-leves">…</dd></div>
+      <div class="destino"><dt>Acidentes</dt><dd id="kpi-acidentes">…</dd></div>
+      <div class="destino"><dt>Mortos a cada 100 acidentes</dt><dd id="kpi-letalidade">…</dd></div>
+    </dl>
+  </div>
+</header>
+
+<form class="filtros" id="filtros" aria-label="Filtros">
+  <label>De <select id="f-de"></select></label>
+  <label>Até <select id="f-ate"></select></label>
+  <label>UF <select id="f-uf"></select></label>
+  <label>Rodovia <select id="f-br"></select></label>
+  <label class="caixa"><input type="checkbox" id="f-fatais"> Só acidentes com mortos</label>
+  <button type="button" id="limpar">Limpar filtros</button>
+  <nav class="atalhos" aria-label="Seções">
+    <a href="#quando">Quando</a><a href="#onde">Onde</a><a href="#porque">Por quê</a><a href="#quem">Quem</a><a href="#sobre">Sobre</a>
+  </nav>
+</form>
+
+<main>
+  <p id="aviso" class="aviso" hidden></p>
+
+  <div id="paineis">
+    <section id="geral" aria-labelledby="t-geral">
+      <h2 id="t-geral">Ano a ano</h2>
+      <div class="grade duas">
+        <figure><h3>Mortos por ano</h3><p class="nota" id="n-anos"></p><div class="grafico" id="g-mortos-ano"></div></figure>
+        <figure><h3>Acidentes por ano</h3><p class="nota" id="n-acidentes-ano"></p><div class="grafico" id="g-acidentes-ano"></div></figure>
+      </div>
+      <figure><h3>Mortos por mês</h3><div class="grafico baixo" id="g-mensal"></div></figure>
+    </section>
+
+    <section id="quando" aria-labelledby="t-quando">
+      <h2 id="t-quando">Quando</h2>
+      <figure><h3>Acidentes por dia da semana e hora</h3><p class="nota" id="n-calor"></p><div class="grafico alto" id="g-calor"></div></figure>
+      <div class="grade duas">
+        <figure><h3>Mortos a cada 100 acidentes, por hora</h3><p class="nota" id="n-hora"></p><div class="grafico" id="g-hora"></div></figure>
+        <figure><h3>Acidentes por mês do ano</h3><p class="nota" id="n-sazonal"></p><div class="grafico" id="g-sazonal"></div></figure>
+      </div>
+    </section>
+
+    <section id="onde" aria-labelledby="t-onde">
+      <h2 id="t-onde">Onde</h2>
+      <figure><h3>Onde se concentram as mortes</h3><p class="nota" id="n-mapa"></p><div class="grafico mapa" id="g-mapa"></div></figure>
+      <div class="grade duas">
+        <figure><h3>Mortos por UF</h3><p class="nota" id="n-uf"></p><div class="grafico alto" id="g-uf"></div></figure>
+        <figure><h3>Mortos por rodovia</h3><p class="nota" id="n-br"></p><div class="grafico alto" id="g-br"></div></figure>
+      </div>
+      <figure>
+        <h3>Trechos de 10 km com mais mortes</h3>
+        <div class="rolagem">
+          <table id="t-trechos">
+            <thead><tr><th>Trecho</th><th>UF</th><th>Município principal</th><th class="num">Mortos</th><th class="num">Acidentes</th><th class="num">Feridos graves</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </figure>
+    </section>
+
+    <section id="porque" aria-labelledby="t-porque">
+      <h2 id="t-porque">Por quê</h2>
+      <figure><h3>Causas mais frequentes</h3><p class="nota" id="n-causa"></p><div class="grafico muito-alto" id="g-causa"></div></figure>
+      <div class="grade duas">
+        <figure><h3>Mortos a cada 100 acidentes, por tipo</h3><p class="nota" id="n-tipo"></p><div class="grafico muito-alto" id="g-tipo"></div></figure>
+        <figure><h3>Mortos a cada 100 acidentes, por condição do tempo</h3><p class="nota" id="n-clima"></p><div class="grafico muito-alto" id="g-clima"></div></figure>
+      </div>
+      <div class="grade duas">
+        <figure><h3>Tipo de pista</h3><div class="grafico curto" id="g-pista"></div></figure>
+        <figure><h3>Área urbana e rural</h3><div class="grafico curto" id="g-solo"></div></figure>
+      </div>
+    </section>
+
+    <section id="quem" aria-labelledby="t-quem">
+      <h2 id="t-quem">Quem</h2>
+      <div class="grade duas">
+        <figure><h3>Mortos por tipo de veículo</h3><p class="nota" id="n-veiculo"></p><div class="grafico alto" id="g-veiculo"></div></figure>
+        <figure><h3>Papel dos envolvidos</h3><div class="grafico alto" id="g-papel"></div></figure>
+      </div>
+      <figure><h3>Mortos e feridos graves por faixa etária e sexo</h3><p class="nota" id="n-vitimas"></p><div class="grafico" id="g-vitimas"></div></figure>
+    </section>
+
+    <section id="sobre" aria-labelledby="t-sobre" class="sobre">
+      <h2 id="t-sobre">Sobre os dados</h2>
+      <p>Projeto de Big Data sobre acidentes nas rodovias federais brasileiras. A pergunta central é quando, onde e por que acontecem os acidentes mais graves.</p>
+      <p>Os dados são os registros de acidentes da Polícia Rodoviária Federal de 2019 a 2025, tratados em Python e reduzidos a um arquivo que o navegador filtra sozinho.</p>
+      <h3>Como ler</h3>
+      <ul>
+        <li>Só entram rodovias federais. Ruas e estradas estaduais ou municipais ficam de fora.</li>
+        <li>Os mortos são os registrados pela PRF nas ocorrências, não o total de mortes no trânsito do país.</li>
+        <li>A PRF ampliou a lista de causas em 2020, de 36 para mais de 60. Comparar causas entre anos pede cuidado.</li>
+        <li>Nos gráficos de mortos a cada 100 acidentes, grupos com menos de 30 acidentes não aparecem, porque a taxa fica instável.</li>
+      </ul>
+      <p><a href="https://www.gov.br/prf/pt-br/acesso-a-informacao/dados-abertos/dados-abertos-da-prf">Dados abertos da PRF</a><br><a href="https://github.com/ViniciusKLima/bigdata">Código do projeto no GitHub</a></p>
+    </section>
+  </div>
+</main>
+
+<script src="assets/plotly.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
