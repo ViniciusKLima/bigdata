@@ -1,24 +1,65 @@
 "use strict";
 
 const COR = { morte: "#c4261d", neutro: "#7c848b", grade: "#d3d7d5", tinta: "#1d2124", suave: "#565d63" };
+const CORES_PIZZA = { Dupla: "#126b50", "Múltipla": "#26788a", Simples: "#bb7110", "Área rural": "#126b50", "Área urbana": "#bb7110" };
 const SEXO = { Masculino: "#14805a", Feminino: "#d1860a" };
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const SEM_INFORMACAO = new Set(["Ignorado", "Não informado", "Não Informado"]);
 const MINIMO_TAXA = 30;
 const TIPOS = { uint8: Uint8Array, uint16: Uint16Array, uint32: Uint32Array, float32: Float32Array };
+const DURACAO_TRANSICAO = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 700;
 
 const $ = (id) => document.getElementById(id);
 const inteiro = (n) => Math.round(n).toLocaleString("pt-BR");
 const decimal = (n) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const taxa = (mortos, acidentes) => (acidentes ? (100 * mortos) / acidentes : 0);
 
+function wilson(sucessos, total, z = 1.959963984540054) {
+  const p = sucessos / total;
+  const z2 = z * z;
+  const divisor = 1 + z2 / total;
+  const centro = (p + z2 / (2 * total)) / divisor;
+  const margem = (z / divisor) * Math.sqrt((p * (1 - p) / total) + z2 / (4 * total * total));
+  return { inferior: centro - margem, superior: centro + margem };
+}
+
+function erfc(x) {
+  const z = Math.abs(x);
+  const t = 1 / (1 + 0.5 * z);
+  const resultado = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196
+    + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398
+    + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+  return x >= 0 ? resultado : 2 - resultado;
+}
+
+function formatarPercentual(proporcao) {
+  return `${decimal(100 * proporcao)}%`;
+}
+
 let meta, col, filtro;
+let temporizadorAnos = null;
+let anosAnimacao = [];
+let indiceAnoAnimacao = -1;
+
+function carregarPlotly() {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "assets/plotly.min.js";
+    script.async = true;
+    script.addEventListener("load", () => resolve(window.Plotly), { once: true });
+    script.addEventListener("error", () => reject(new Error("A biblioteca dos gráficos não carregou. Recarregue a página.")), { once: true });
+    document.head.append(script);
+  });
+}
 
 async function carregar() {
   if (!("DecompressionStream" in window)) {
     throw new Error("Este navegador é antigo demais para abrir o painel. Atualize-o e recarregue a página.");
   }
-  const [respostaMeta, respostaDados] = await Promise.all([fetch("assets/meta.json"), fetch("assets/dados.bin.gz")]);
+  const [respostaMeta, respostaDados, plotly] = await Promise.all([
+    fetch("assets/meta.json"), fetch("assets/dados.bin.gz"), carregarPlotly(),
+  ]);
+  if (!plotly) throw new Error("A biblioteca dos gráficos não carregou. Recarregue a página.");
   if (!respostaMeta.ok || !respostaDados.ok) throw new Error("Os dados não foram encontrados. Recarregue a página.");
   meta = await respostaMeta.json();
   const fluxo = respostaDados.body.pipeThrough(new DecompressionStream("gzip"));
@@ -51,13 +92,16 @@ function preencherFiltros() {
   opcoes($("f-br"), [[-1, "Todas"], ...meta.brs.map((b, i) => [i, nomeBr(b)])]);
   $("filtros").addEventListener("change", lerFiltros);
   $("filtros").addEventListener("submit", (e) => e.preventDefault());
+  $("animar-anos").addEventListener("click", alternarAnimacaoAnos);
   $("limpar").addEventListener("click", () => {
+    pararAnimacaoAnos();
     filtro = { de: meta.anos[0], ate: meta.anos[meta.anos.length - 1], uf: -1, br: -1, fatais: false };
     aplicar();
   });
 }
 
 function lerFiltros(evento) {
+  pararAnimacaoAnos();
   filtro = {
     de: +$("f-de").value, ate: +$("f-ate").value,
     uf: +$("f-uf").value, br: +$("f-br").value, fatais: $("f-fatais").checked,
@@ -67,6 +111,56 @@ function lerFiltros(evento) {
     else filtro.de = filtro.ate;
   }
   aplicar();
+}
+
+function atualizarBotaoAnimacao() {
+  const botao = $("animar-anos");
+  const reproduzindo = temporizadorAnos !== null;
+  botao.setAttribute("aria-pressed", String(reproduzindo));
+  botao.textContent = reproduzindo ? "⏸ Pausar" : anosAnimacao.length ? "▶ Continuar" : "▶ Animar por ano";
+}
+
+function pararAnimacaoAnos(concluida = false) {
+  if (temporizadorAnos !== null) clearInterval(temporizadorAnos);
+  temporizadorAnos = null;
+  anosAnimacao = [];
+  indiceAnoAnimacao = -1;
+  atualizarBotaoAnimacao();
+  $("estado-animacao").textContent = concluida ? "Animação concluída." : "";
+}
+
+function avancarAnoAnimacao() {
+  const proximo = indiceAnoAnimacao + 1;
+  if (proximo >= anosAnimacao.length) {
+    pararAnimacaoAnos(true);
+    return;
+  }
+  indiceAnoAnimacao = proximo;
+  const ano = anosAnimacao[indiceAnoAnimacao];
+  filtro = { ...filtro, de: ano, ate: ano };
+  $("estado-animacao").textContent = `Ano ${ano} (${indiceAnoAnimacao + 1} de ${anosAnimacao.length})`;
+  aplicar();
+}
+
+function alternarAnimacaoAnos() {
+  if (temporizadorAnos !== null) {
+    clearInterval(temporizadorAnos);
+    temporizadorAnos = null;
+    $("estado-animacao").textContent = `Pausada em ${anosAnimacao[indiceAnoAnimacao]}.`;
+    atualizarBotaoAnimacao();
+    return;
+  }
+  if (!anosAnimacao.length) {
+    anosAnimacao = meta.anos.filter((ano) => ano >= filtro.de && ano <= filtro.ate);
+    if (anosAnimacao.length < 2) {
+      $("estado-animacao").textContent = "Selecione um período com pelo menos dois anos.";
+      return;
+    }
+    indiceAnoAnimacao = -1;
+  }
+  avancarAnoAnimacao();
+  temporizadorAnos = setInterval(avancarAnoAnimacao, 1400);
+  atualizarBotaoAnimacao();
 }
 
 function aplicar() {
@@ -98,6 +192,10 @@ function agregar() {
   const contador = (n) => ({ a: new Float64Array(n), m: new Float64Array(n) });
   const r = {
     acidentes: 0, mortos: 0, graves: 0, leves: 0,
+    inferencia: {
+      fimSemana: { fatais: 0, total: 0 },
+      diasUteis: { fatais: 0, total: 0 },
+    },
     ano: contador(nAnos), mensal: new Float64Array(nAnos * 12),
     calor: new Float64Array(7 * 24), hora: contador(24), mes: new Float64Array(12),
     uf: contador(c.uf.length), br: contador(meta.brs.length),
@@ -116,6 +214,13 @@ function agregar() {
     if (uf >= 0 && col.uf[i] !== uf) continue;
     if (br >= 0 && col.br[i] !== br) continue;
     const m = col.mortos[i];
+    const grupo = col.dia[i] >= 5 && col.dia[i] <= 6
+      ? r.inferencia.fimSemana
+      : col.dia[i] < 5 ? r.inferencia.diasUteis : null;
+    if (grupo) {
+      grupo.total++;
+      if (m > 0) grupo.fatais++;
+    }
     if (fatais && m === 0) continue;
     passa[i] = 1;
 
@@ -161,7 +266,12 @@ function agregar() {
 
 /* ---------- Gráficos ---------- */
 
-const CONFIG = { displayModeBar: false, responsive: true };
+const CONFIG = {
+  displayModeBar: "hover",
+  displaylogo: false,
+  modeBarButtonsToRemove: ["toImage"],
+  responsive: true,
+};
 
 function base(extra = {}) {
   return {
@@ -171,19 +281,116 @@ function base(extra = {}) {
     margin: { l: 8, r: 16, t: 12, b: 28 },
     barcornerradius: 3,
     bargap: 0.28,
+    dragmode: "zoom",
+    hovermode: "closest",
+    transition: { duration: DURACAO_TRANSICAO, easing: "cubic-in-out" },
     hoverlabel: { bgcolor: "#fff", bordercolor: COR.grade, font: { family: "Overpass, Arial, sans-serif", color: COR.tinta } },
     ...extra,
   };
 }
 
-const eixoValor = { gridcolor: COR.grade, zeroline: false, automargin: true, rangemode: "tozero", tickformat: ",d", fixedrange: true };
-const eixoCategoria = { showgrid: false, zeroline: false, automargin: true, fixedrange: true, tickfont: { color: COR.suave } };
+const eixoValor = { gridcolor: COR.grade, zeroline: false, automargin: true, rangemode: "tozero", tickformat: ",d" };
+const eixoCategoria = { showgrid: false, zeroline: false, automargin: true, tickfont: { color: COR.suave } };
+
+const graficosVisiveis = new WeakSet();
+const graficosObservados = new WeakSet();
+const graficosPendentes = new Map();
+const observadorGraficos = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entradas) => {
+  for (const entrada of entradas) {
+    const el = entrada.target;
+    if (!entrada.isIntersecting) {
+      graficosVisiveis.delete(el);
+      continue;
+    }
+    graficosVisiveis.add(el);
+    const pendente = graficosPendentes.get(el);
+    if (pendente) {
+      graficosPendentes.delete(el);
+      renderizarGrafico(el, ...pendente);
+    }
+  }
+}, { rootMargin: "300px 0px" });
+
+function renderizarGrafico(el, dados, layout, config) {
+  const renderizacao = Plotly.react(el, dados, { ...layout, uirevision: layout.uirevision || el.id }, config);
+  if (el.id === "g-mapa") {
+    renderizacao.catch(() => nota("n-mapa", "O mapa precisa de WebGL, que está desligado neste navegador."));
+  }
+}
 
 function plotar(id, dados, layout, config = CONFIG) {
   const el = $(id);
   el.setAttribute("role", "img");
   el.setAttribute("aria-label", el.parentElement.querySelector("h3").textContent);
-  Plotly.react(el, dados, layout, config);
+  if (!observadorGraficos || graficosVisiveis.has(el)) {
+    renderizarGrafico(el, dados, layout, config);
+    return;
+  }
+  graficosPendentes.set(el, [dados, layout, config]);
+  if (!graficosObservados.has(el)) {
+    observadorGraficos.observe(el);
+    graficosObservados.add(el);
+  }
+}
+
+function configurarDestaqueGraficos() {
+  let figuraAberta = null;
+
+  const redimensionar = () => {
+    if (!figuraAberta) return;
+    const grafico = figuraAberta.querySelector(".grafico");
+    if (grafico._fullLayout) Plotly.Plots.resize(grafico);
+  };
+  const fechar = (devolverFoco = false) => {
+    if (!figuraAberta) return;
+    const figura = figuraAberta;
+    const titulo = figura.querySelector("h3");
+    figura.classList.remove("grafico-ampliado");
+    titulo.setAttribute("aria-pressed", "false");
+    titulo.setAttribute("aria-label", `Ampliar gráfico: ${titulo.textContent}`);
+    figuraAberta = null;
+    document.body.classList.remove("grafico-em-destaque");
+    if (devolverFoco) titulo.focus();
+    requestAnimationFrame(() => {
+      const grafico = figura.querySelector(".grafico");
+      if (grafico._fullLayout) Plotly.Plots.resize(grafico);
+    });
+  };
+  const alternar = (titulo) => {
+    const figura = titulo.closest("figure");
+    if (figuraAberta === figura) {
+      fechar();
+      return;
+    }
+    if (figuraAberta) fechar();
+    figuraAberta = figura;
+    figura.classList.add("grafico-ampliado");
+    titulo.setAttribute("aria-pressed", "true");
+    titulo.setAttribute("aria-label", `Restaurar gráfico: ${titulo.textContent}`);
+    document.body.classList.add("grafico-em-destaque");
+    requestAnimationFrame(redimensionar);
+  };
+
+  document.querySelectorAll("figure > h3").forEach((titulo) => {
+    if (!titulo.parentElement.querySelector(".grafico")) return;
+    titulo.classList.add("titulo-grafico");
+    titulo.setAttribute("role", "button");
+    titulo.setAttribute("tabindex", "0");
+    titulo.setAttribute("aria-pressed", "false");
+    titulo.setAttribute("aria-label", `Ampliar gráfico: ${titulo.textContent}`);
+    titulo.addEventListener("click", () => alternar(titulo));
+    titulo.addEventListener("keydown", (evento) => {
+      if (evento.key === "Enter" || evento.key === " ") {
+        evento.preventDefault();
+        alternar(titulo);
+      }
+    });
+  });
+
+  document.addEventListener("keydown", (evento) => {
+    if (evento.key === "Escape") fechar(true);
+  });
+  window.addEventListener("resize", redimensionar);
 }
 
 function quebrar(texto, largura = 32) {
@@ -209,10 +416,116 @@ function barrasH(id, itens, { cor, formato = ",d", unidade = "", detalhe }) {
     customdata: ordem.map((d) => (detalhe ? detalhe(d) : "")),
     hovertemplate: `<b>%{y}</b><br>%{x:${formato}}${unidade}%{customdata}<extra></extra>`,
   }], base({
-    xaxis: { showgrid: false, zeroline: false, fixedrange: true, showticklabels: false, autorange: false, range: [0, Math.max(...itens.map((d) => d.valor), 1) * 1.2] },
+    xaxis: { showgrid: false, zeroline: false, showticklabels: false, autorange: false, range: [0, Math.max(...itens.map((d) => d.valor), 1) * 1.2] },
     yaxis: { ...eixoCategoria, tickfont: { color: COR.tinta, size: 13 } },
     margin: { l: 8, r: 8, t: 4, b: 4 },
   }));
+}
+
+function pizza(id, notaId, itens) {
+  const dados = itens.filter((d) => d.valor > 0);
+  const total = dados.reduce((soma, d) => soma + d.valor, 0);
+  if (!dados.length) {
+    plotar(id, [], base());
+    nota(notaId, "Sem dados para os filtros selecionados.");
+    return;
+  }
+  const maisFrequente = [...dados].sort((a, b) => b.valor - a.valor)[0];
+  const traces = [];
+  const percentuais = [];
+  let inicio = -Math.PI / 2;
+
+  dados.forEach((d) => {
+    const proporcao = d.valor / total;
+    const fim = inicio + 2 * Math.PI * proporcao;
+    const meio = (inicio + fim) / 2;
+    const passos = Math.max(8, Math.ceil(48 * proporcao));
+    const centroX = 0.035 * Math.cos(meio);
+    const centroY = 0.035 * Math.sin(meio);
+    const raio = 0.9;
+    const topo = 0.12;
+    const fundo = -0.08;
+    const x = [centroX, centroX];
+    const y = [centroY, centroY];
+    const z = [topo, fundo];
+
+    for (let passo = 0; passo <= passos; passo++) {
+      const angulo = inicio + ((fim - inicio) * passo) / passos;
+      x.push(centroX + raio * Math.cos(angulo), centroX + raio * Math.cos(angulo));
+      y.push(centroY + raio * Math.sin(angulo), centroY + raio * Math.sin(angulo));
+      z.push(topo, fundo);
+    }
+
+    const i = [], j = [], k = [];
+    for (let passo = 0; passo < passos; passo++) {
+      const topoAtual = 2 + passo * 2;
+      const fundoAtual = topoAtual + 1;
+      const topoProximo = topoAtual + 2;
+      const fundoProximo = topoAtual + 3;
+
+      i.push(0, 1, topoAtual, topoAtual);
+      j.push(topoAtual, fundoProximo, topoProximo, fundoProximo);
+      k.push(topoProximo, fundoAtual, fundoProximo, fundoAtual);
+    }
+    const topoFinal = 2 + passos * 2;
+    const fundoFinal = topoFinal + 1;
+    i.push(0, 0, 0, 0);
+    j.push(2, 3, topoFinal, fundoFinal);
+    k.push(3, 1, fundoFinal, 1);
+
+    const cor = CORES_PIZZA[d.nome] || "#65747b";
+    traces.push({
+      type: "mesh3d",
+      name: `${d.nome} · ${decimal(100 * proporcao)}%`,
+      x, y, z, i, j, k,
+      color: cor,
+      showlegend: true,
+      flatshading: false,
+      lighting: { ambient: 0.55, diffuse: 0.8, specular: 0.35, roughness: 0.55, fresnel: 0.12 },
+      lightposition: { x: 120, y: 180, z: 240 },
+      text: Array(x.length).fill(`${d.nome}: ${inteiro(d.valor)} acidentes (${decimal(100 * proporcao)}%)`),
+      hovertemplate: "<b>%{text}</b><extra></extra>",
+      showscale: false,
+    });
+    percentuais.push({
+      x: centroX + 0.56 * Math.cos(meio),
+      y: centroY + 0.56 * Math.sin(meio),
+      z: topo + 0.025,
+      texto: `${decimal(100 * proporcao)}%`,
+    });
+    inicio = fim;
+  });
+
+  traces.push({
+    type: "scatter3d",
+    mode: "text",
+    x: percentuais.map((d) => d.x),
+    y: percentuais.map((d) => d.y),
+    z: percentuais.map((d) => d.z),
+    text: percentuais.map((d) => d.texto),
+    textposition: "middle center",
+    textfont: { color: "#fff", size: 15, family: "Overpass, Arial, sans-serif" },
+    hoverinfo: "skip",
+    showlegend: false,
+  });
+
+  plotar(id, traces, base({
+    showlegend: true,
+    margin: { l: 0, r: 0, t: 0, b: 38 },
+    legend: { orientation: "h", x: 0.5, xanchor: "center", y: 0, yanchor: "bottom", font: { size: 12 } },
+    scene: {
+      xaxis: { visible: false, range: [-1.12, 1.12] },
+      yaxis: { visible: false, range: [-1.12, 1.12] },
+      zaxis: { visible: false, range: [-0.2, 0.3] },
+      domain: { x: [0, 1], y: [0.1, 1] },
+      aspectmode: "manual",
+      aspectratio: { x: 1, y: 1, z: 0.4 },
+      camera: { eye: { x: 0.85, y: -0.85, z: 0.95 }, center: { x: 0, y: 0, z: 0 }, projection: { type: "perspective" } },
+      dragmode: "orbit",
+      uirevision: `${id}-3d`,
+    },
+  }));
+  nota(notaId, `${inteiro(total)} acidentes; mais frequente: ${maisFrequente.nome} (${decimal((100 * maisFrequente.valor) / total)}%)`);
 }
 
 function ranking(nomes, k, limite, ordenar) {
@@ -240,6 +553,61 @@ function colunas(id, x, y, cor, unidade, { formato = ",d", tick } = {}) {
 
 function nota(id, texto) { $(id).textContent = texto; }
 
+function desenharInferencia(grupos) {
+  const fim = grupos.fimSemana, uteis = grupos.diasUteis;
+  $("n-fatais-fds").textContent = inteiro(fim.fatais);
+  $("n-total-fds").textContent = inteiro(fim.total);
+  $("n-fatais-uteis").textContent = inteiro(uteis.fatais);
+  $("n-total-uteis").textContent = inteiro(uteis.total);
+
+  if (!fim.total || !uteis.total) {
+    $("p-fds").textContent = fim.total ? formatarPercentual(fim.fatais / fim.total) : "—";
+    $("p-uteis").textContent = uteis.total ? formatarPercentual(uteis.fatais / uteis.total) : "—";
+    nota("n-inferencia", "Não há acidentes suficientes nos dois grupos para calcular o intervalo e o teste.");
+    return;
+  }
+
+  const pFim = fim.fatais / fim.total;
+  const pUteis = uteis.fatais / uteis.total;
+  const diferenca = pFim - pUteis;
+  const icFim = wilson(fim.fatais, fim.total);
+  const icUteis = wilson(uteis.fatais, uteis.total);
+  const icInferior = diferenca - Math.sqrt((pFim - icFim.inferior) ** 2 + (icUteis.superior - pUteis) ** 2);
+  const icSuperior = diferenca + Math.sqrt((icFim.superior - pFim) ** 2 + (pUteis - icUteis.inferior) ** 2);
+  $("p-fds").textContent = formatarPercentual(pFim);
+  $("p-uteis").textContent = formatarPercentual(pUteis);
+
+  const proporcaoCombinada = (fim.fatais + uteis.fatais) / (fim.total + uteis.total);
+  const erroPadrao = Math.sqrt(proporcaoCombinada * (1 - proporcaoCombinada)
+    * (1 / fim.total + 1 / uteis.total));
+  const esperados = [
+    fim.total * proporcaoCombinada,
+    fim.total * (1 - proporcaoCombinada),
+    uteis.total * proporcaoCombinada,
+    uteis.total * (1 - proporcaoCombinada),
+  ];
+  const diferencaPp = 100 * diferenca;
+  const icInferiorPp = 100 * icInferior;
+  const icSuperiorPp = 100 * icSuperior;
+  let resultado = `Diferença (fim de semana − dias úteis): ${decimal(diferencaPp)} pontos percentuais; IC 95% [${decimal(icInferiorPp)}, ${decimal(icSuperiorPp)}].`;
+
+  if (erroPadrao === 0 || esperados.some((n) => n < 5)) {
+    resultado += " Teste z não calculado: pelo menos uma contagem esperada sob H₀ é menor que 5.";
+  } else {
+    const z = diferenca / erroPadrao;
+    const pValor = erfc(Math.abs(z) / Math.SQRT2);
+    const significativo = pValor < 0.05;
+    const valorFormatado = pValor < 0.0001 ? "< 0,0001" : pValor.toLocaleString("pt-BR", {
+      minimumFractionDigits: 4, maximumFractionDigits: 4,
+    });
+    resultado += ` z = ${decimal(z)}; p-valor = ${valorFormatado}. `;
+    resultado += significativo
+      ? "Rejeita-se H₀ a 5%: há evidência de diferença entre as proporções."
+      : "Não se rejeita H₀ a 5%: não há evidência suficiente de diferença entre as proporções.";
+  }
+  nota("n-inferencia", resultado);
+}
+
 function desenhar(r) {
   const c = meta.categorias;
 
@@ -252,7 +620,12 @@ function desenhar(r) {
   const lugar = filtro.uf >= 0 ? c.uf[filtro.uf] : "Brasil";
   const periodo = filtro.de === filtro.ate ? `${filtro.de}` : `${filtro.de} a ${filtro.ate}`;
   const trecho = filtro.br >= 0 ? `${nomeBr(meta.brs[filtro.br])}, ` : "";
-  $("escopo").textContent = `${trecho}${lugar}, ${periodo}${filtro.fatais ? ", só acidentes com mortos" : ""}`;
+  const [anoFim, mesFim, diaFim] = (meta.data_fim || "").split("-").map(Number);
+  const parcial = filtro.ate === anoFim && anoFim === meta.anos[meta.anos.length - 1]
+    && (mesFim !== 12 || diaFim !== 31)
+    ? `, dados parciais até ${String(diaFim).padStart(2, "0")}/${String(mesFim).padStart(2, "0")}/${anoFim}`
+    : "";
+  $("escopo").textContent = `${trecho}${lugar}, ${periodo}${parcial}${filtro.fatais ? ", só acidentes com mortos" : ""}`;
   const numero = $("escudo-numero");
   const comNumero = filtro.br >= 0 && meta.brs[filtro.br] !== 0;
   numero.textContent = comNumero ? String(meta.brs[filtro.br]).padStart(3, "0") : filtro.br >= 0 ? "?" : "todas";
@@ -265,6 +638,8 @@ function desenhar(r) {
     $("aviso").textContent = "Nenhum acidente com esses filtros. Troque a UF ou a rodovia, ou use Limpar filtros.";
     return;
   }
+
+  desenharInferencia(r.inferencia);
 
   // Ano a ano
   const anosVisiveis = meta.anos.map((a, i) => ({ ano: String(a), i })).filter((d) => +d.ano >= filtro.de && +d.ano <= filtro.ate);
@@ -358,8 +733,12 @@ function desenhar(r) {
   const climas = porTaxa(c.clima, r.clima);
   barrasH("g-clima", climas, { cor: COR.morte, formato: ".1f", detalhe: detalheTaxa });
   nota("n-clima", climas.length ? `O mais letal: ${climas[0].nome.toLowerCase()}` : "");
-  barrasH("g-pista", porTaxa(c.pista, r.pista), { cor: COR.morte, formato: ".1f", detalhe: detalheTaxa });
+  pizza("g-pista-distribuicao", "n-pista-distribuicao",
+    c.pista.map((nome, i) => ({ nome, valor: r.pista.a[i] })));
   const nomesSolo = c.solo.map((s) => (s === "Sim" ? "Área urbana" : "Área rural"));
+  pizza("g-solo-distribuicao", "n-solo-distribuicao",
+    nomesSolo.map((nome, i) => ({ nome, valor: r.solo.a[i] })));
+  barrasH("g-pista", porTaxa(c.pista, r.pista), { cor: COR.morte, formato: ".1f", detalhe: detalheTaxa });
   barrasH("g-solo", porTaxa(nomesSolo, r.solo), { cor: COR.morte, formato: ".1f", detalhe: detalheTaxa });
 
   // Quem
@@ -401,6 +780,8 @@ function desenharMapa(r) {
 }
 
 /* ---------- Início ---------- */
+
+configurarDestaqueGraficos();
 
 carregar().then(() => {
   preencherFiltros();

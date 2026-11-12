@@ -66,14 +66,8 @@ def tabela_pessoas(pacote, prefixo, grupos):
     pacote.adicionar(f"{prefixo}_n", resumo["n"].to_numpy(dtype=np.uint32))
 
 
-def main():
-    SAIDA.mkdir(parents=True, exist_ok=True)
-    a = pd.read_parquet(ACIDENTES_PARQUET).sort_values(["ano", "uf", "br", "data_hora"], ignore_index=True)
-    p = pd.read_parquet(
-        PESSOAS_PARQUET,
-        columns=["id", "tipo_veiculo", "tipo_envolvido", "estado_fisico", "faixa_etaria", "sexo"],
-    )
-
+def gerar_pacote(a, p):
+    """Codifica os dados tratados e devolve metadados e colunas do site."""
     a["causa_acidente"] = unificar_grafia(a["causa_acidente"])
     a["tipo_acidente"] = unificar_grafia(a["tipo_acidente"])
 
@@ -139,15 +133,32 @@ def main():
 
     meta = {
         "linhas": len(a), "anos": anos, "brs": brs, "dias": DIAS,
+        "data_inicio": a["data"].min().date().isoformat(),
+        "data_fim": a["data"].max().date().isoformat(),
         "categorias": categorias, "trechos": trechos, "colunas": pacote.colunas,
     }
+
+    return meta, pacote
+
+
+def main():
+    SAIDA.mkdir(parents=True, exist_ok=True)
+    a = pd.read_parquet(ACIDENTES_PARQUET).sort_values(["ano", "uf", "br", "data_hora"], ignore_index=True)
+    p = pd.read_parquet(
+        PESSOAS_PARQUET,
+        columns=["id", "tipo_veiculo", "tipo_envolvido", "estado_fisico", "faixa_etaria", "sexo"],
+    )
+    meta, pacote = gerar_pacote(a, p)
     (SAIDA / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     with gzip.open(SAIDA / "dados.bin.gz", "wb", compresslevel=9) as f:
         for parte in pacote.partes:
             f.write(parte)
 
     tamanho = (SAIDA / "dados.bin.gz").stat().st_size / 1e6
-    print(f"{len(a):,} acidentes, {len(pontos):,} pontos no mapa, {len(trechos):,} trechos")
+    print(
+        f"{len(a):,} acidentes, {meta['colunas']['mapa_linha']['n']:,} pontos no mapa, "
+        f"{len(meta['trechos']):,} trechos"
+    )
     print(f"dados.bin.gz: {tamanho:.1f} MB")
 
 

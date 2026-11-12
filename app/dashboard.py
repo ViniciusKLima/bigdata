@@ -62,7 +62,17 @@ if so_fatais:
 df = acidentes[filtro]
 pes = pessoas[pessoas["id"].isin(df["id"])]
 
-st.sidebar.caption(f"Fonte: PRF – Dados Abertos. {len(acidentes):,} acidentes de 2019 a 2025.".replace(",", "."))
+ano_inicial, ano_final = int(anos[0]), int(anos[-1])
+fim_periodo = acidentes["data"].max()
+parcial = (
+    f" Dados até {fim_periodo:%d/%m/%Y} (ano parcial)."
+    if fim_periodo.year == ano_final and (fim_periodo.month, fim_periodo.day) != (12, 31)
+    else ""
+)
+st.sidebar.caption(
+    f"Fonte: PRF – Dados Abertos. {len(acidentes):,} acidentes de "
+    f"{ano_inicial} a {ano_final}.{parcial}".replace(",", ".")
+)
 
 # ---------------- Cabeçalho e KPIs ----------------
 st.title("🚧 Acidentes nas Rodovias Federais")

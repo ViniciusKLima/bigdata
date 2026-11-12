@@ -16,6 +16,7 @@ import zipfile
 from config import DADOS
 
 ANOS = range(2019, 2026)
+ANOS_ACIDENTES = range(2019, 2027)
 DRIVE = "https://drive.usercontent.google.com/download?id={}&export=download&confirm=t"
 GOV = "https://www.gov.br/transportes/pt-br/assuntos/transito"
 
@@ -25,18 +26,21 @@ PRF_OCORRENCIA = {
     2021: "12xH8LX9aN2gObR766YN3cMcuycwyCJDz", 2022: "1PRQjuV5gOn_nn6UNvaJyVURDIfbSAK4-",
     2023: "1-WO3SfNrwwZ5_l7fRTiwBKRw7mi1-HUq", 2024: "14lB0vqMFkaZj8HZ44b0njYgxs9nAN8KO",
     2025: "1-G3MdmHBt6CprDwcW99xxC4BZ2DU5ryR",
+    2026: "1A3IirNm0AzRaSosA1IS94DOVmvKsn0Ol",
 }
 PRF_PESSOA = {
     2019: "14r_9zudjjndgcnjRddzD5lvn9MX5VvZZ", 2020: "1iQvs2D9a2XO9vIukrjEIIhtjzkNkgD7Z",
     2021: "15W_l07-6taOh8Ycn8uk2Er9PnSj0vq3f", 2022: "1sd8YIqIHapYaxQeaa-6yeWMdVLTl6hgD",
     2023: "1-Yk6TV00CH3PixTkKmkoUJQsNiUc5xLm", 2024: "14lVfqdoE2gxDliaKZu7K9Mx6847maPtl",
     2025: "1-Gp9S-ALO0D1nT8S_OKoC8xlW7BY8F82",
+    2026: "1B_rvx1kPHuFowP5rs84ZO-57gN8yUs85",
 }
 PRF_PESSOA_TODAS_CAUSAS = {
     2019: "1DAJYKVfkTcPhQodSmHp9rsG1Q8XJW-m3", 2020: "1yQtVOsAlupPHQVVTmbJo0NR3XMzgHANO",
     2021: "1Gk3U6cMOZIevsDZHLi6J503xoCRS_lnI", 2022: "1wskEgRC3ame7rncSDQ7qWhKsoKw1lohY",
     2023: "1-caam_dahYOf2eorq4mez04Om6DD5d_3", 2024: "14qBOhrE1gioVtuXgxkCJ9kCA8YtUGXKA",
     2025: "1-PJGRbfSe7PVjU37A3wTCls_NRXyVGRD",
+    2026: "1EsGox0UnBWSaM6mrkNSUlYUOecubLCsh",
 }
 PRF_INFRACOES = {
     2019: "1R5LiAULtB22HP0EkG8GSwzTTSAvbp35L", 2020: "1e9DfwTd4DlQ57Wl0zGx3pvBBTuq07sUW",
@@ -55,10 +59,10 @@ FROTA = {
 }
 
 
-def baixar(url, destino, extrair=False):
+def baixar(url, destino, extrair=False, atualizar=False):
     """Baixa url para destino; se extrair=True, descompacta o zip na mesma pasta."""
     destino.parent.mkdir(parents=True, exist_ok=True)
-    if destino.exists() and destino.stat().st_size > 0:
+    if destino.exists() and destino.stat().st_size > 0 and not atualizar:
         print(f"  já existe: {destino.relative_to(DADOS)}")
     else:
         print(f"  baixando: {destino.relative_to(DADOS)} ...", end=" ", flush=True)
@@ -70,21 +74,33 @@ def baixar(url, destino, extrair=False):
         except Exception as erro:
             temporario.unlink(missing_ok=True)
             print(f"FALHOU ({erro})")
-            return
-        temporario.rename(destino)
+            raise RuntimeError(f"Não foi possível baixar {destino.relative_to(DADOS)}") from erro
+        temporario.replace(destino)
         print(f"{destino.stat().st_size / 1e6:.1f} MB")
     if extrair:
         with zipfile.ZipFile(destino) as z:
             z.extractall(destino.parent)
 
 
-def acidentes():
+def baixar_ano_acidentes(ano, incluir_todas_as_causas=True, atualizar=False):
     pasta = DADOS / "prf"
-    for ano in ANOS:
-        baixar(DRIVE.format(PRF_OCORRENCIA[ano]), pasta / "acidentes_ocorrencia" / f"datatran{ano}.zip", True)
-        baixar(DRIVE.format(PRF_PESSOA[ano]), pasta / "acidentes_pessoa" / f"acidentes{ano}.zip", True)
+    baixar(DRIVE.format(PRF_OCORRENCIA[ano]), pasta / "acidentes_ocorrencia" / f"datatran{ano}.zip",
+           True, atualizar)
+    baixar(DRIVE.format(PRF_PESSOA[ano]), pasta / "acidentes_pessoa" / f"acidentes{ano}.zip",
+           True, atualizar)
+    if incluir_todas_as_causas:
         baixar(DRIVE.format(PRF_PESSOA_TODAS_CAUSAS[ano]),
-               pasta / "acidentes_pessoa_todas_causas" / f"acidentes{ano}_todas_causas.zip", True)
+               pasta / "acidentes_pessoa_todas_causas" / f"acidentes{ano}_todas_causas.zip",
+               True, atualizar)
+
+
+def acidentes():
+    for ano in ANOS_ACIDENTES:
+        baixar_ano_acidentes(ano)
+
+
+def acidentes_2026():
+    baixar_ano_acidentes(2026, incluir_todas_as_causas=False, atualizar=True)
 
 
 def infracoes():
@@ -116,7 +132,10 @@ def inmet():
         baixar(f"https://portal.inmet.gov.br/uploads/dadoshistoricos/{ano}.zip", DADOS / "inmet" / f"inmet_{ano}.zip")
 
 
-GRUPOS = {"acidentes": acidentes, "infracoes": infracoes, "ibge": ibge, "frota": frota, "inmet": inmet}
+GRUPOS = {
+    "acidentes": acidentes, "acidentes-2026": acidentes_2026,
+    "infracoes": infracoes, "ibge": ibge, "frota": frota, "inmet": inmet,
+}
 
 if __name__ == "__main__":
     for nome in sys.argv[1:] or GRUPOS:
