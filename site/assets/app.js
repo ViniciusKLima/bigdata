@@ -646,12 +646,16 @@ function desenhar(r) {
   const serie = (k) => anosVisiveis.map((d) => k[d.i]);
   colunas("g-mortos-ano", anosVisiveis.map((d) => d.ano), serie(r.ano.m), COR.morte, " mortos");
   colunas("g-acidentes-ano", anosVisiveis.map((d) => d.ano), serie(r.ano.a), COR.neutro, " acidentes");
+  // Um ano parcial não entra na comparação: ela vai até o último ano completo do período
+  const anoParcial = parcial ? anoFim : null;
+  const completos = anosVisiveis.filter((d) => +d.ano !== anoParcial);
   const variacao = (k) => {
-    const v = serie(k);
+    const v = completos.map((d) => k[d.i]);
     if (v.length < 2 || !v[0]) return "";
     const p = (100 * (v[v.length - 1] - v[0])) / v[0];
     const lado = p >= 0 ? "Alta" : "Queda";
-    return `${lado} de ${decimal(Math.abs(p))}% entre ${filtro.de} e ${filtro.ate}`;
+    const aviso = anoParcial ? ` (${anoParcial} fica de fora por ser parcial)` : "";
+    return `${lado} de ${decimal(Math.abs(p))}% entre ${completos[0].ano} e ${completos[completos.length - 1].ano}${aviso}`;
   };
   nota("n-anos", variacao(r.ano.m));
   nota("n-acidentes-ano", variacao(r.ano.a));
@@ -660,6 +664,7 @@ function desenhar(r) {
   anosVisiveis.forEach((d) => {
     for (let m = 0; m < 12; m++) {
       if (d.i * 12 + m >= r.mensal.length) continue;
+      if (+d.ano === anoFim && m + 1 > mesFim) continue;
       datas.push(`${d.ano}-${String(m + 1).padStart(2, "0")}-01`);
       rotulos.push(`${MESES[m]} de ${d.ano}`);
       valores.push(r.mensal[d.i * 12 + m]);
